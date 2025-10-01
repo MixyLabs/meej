@@ -1,0 +1,10 @@
+*.db
+*.log
+.vscode
+*.exe
+meej-dev
+meej-release
+releases/
+*.bin
+logs/
+preferences.yaml
