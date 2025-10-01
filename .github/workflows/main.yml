@@ -28,7 +28,7 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
-      - name: Build meej (Linux)
+      - name: Build meej for Linux
         if: runner.os == 'Linux'
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
@@ -39,9 +39,9 @@ jobs:
           else
             LDFLAGS=""
           fi
-          go build -o deej-$BUILD_TYPE -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
+          go build -o meej-linux-x86_64-$BUILD_TYPE -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
 
-      - name: Build meej (Windows)
+      - name: Build meej for Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -53,22 +53,12 @@ jobs:
           } else {
             $LDFLAGS = ""
           }
-          go build -o deej-$BUILD_TYPE.exe -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
+          go build -o meej-windows-x86_64-$BUILD_TYPE.exe -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
 
-
-      - name: Upload Windows binaries to release
-        if: runner.os == 'Windows'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          file: deej-${{ matrix.mode }}.exe
-          asset_name: deej-${{ matrix.mode }}.exe
-          tag: ${{ github.ref }}
-
-      - name: Upload Linux binaries to release
-        if: runner.os == 'Linux'
+      - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: deej-${{ matrix.mode }}
-          asset_name: deej-${{ matrix.mode }}
+          file: meej-*
           tag: ${{ github.ref }}
+          file_glob: true
