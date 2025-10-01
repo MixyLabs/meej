@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*.*.*'
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   build:
@@ -13,24 +13,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        mode: [release, dev]
-        go: ["1.24"]
+        os: [ windows-latest, ubuntu-latest ]
+        mode: [ release, dev ]
+        go: [ "1.24" ]
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
 
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Build deej
+      - name: Build meej
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
           VERSION_TAG=${{ github.ref_name }}
           BUILD_TYPE=${{ matrix.mode }}
-          go build -o deej-release -ldflags "-s -w -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/deej/cmd
+          go build -o deej-release -ldflags "-s -w -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
           
 
