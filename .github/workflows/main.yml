@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ windows-latest, ubuntu-latest ]
+        os: [ ubuntu-latest ]
         mode: [ release, dev ]
         go: [ "1.24" ]
 
@@ -26,11 +26,19 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
-      - name: Build meej
+      - name: Build meej (Linux)
+        if: runner.os == 'Linux'
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
           VERSION_TAG=${{ github.ref_name }}
           BUILD_TYPE=${{ matrix.mode }}
           go build -o deej-release -ldflags "-s -w -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
-          
 
+      - name: Build meej (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $GIT_COMMIT = (git rev-parse --short HEAD)
+          $VERSION_TAG = "${{ github.ref_name }}"
+          $BUILD_TYPE = "${{ matrix.mode }}"
+          go build -o deej-release.exe -ldflags "-s -w -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
