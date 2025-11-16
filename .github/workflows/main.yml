@@ -53,7 +53,7 @@ jobs:
           } else {
             $LDFLAGS = ""
           }
-          go build -o meej-windows-x86_64-$BUILD_TYPE.exe -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/meej/cmd
+          go build -o meej-windows-x86_64-$BUILD_TYPE.exe -ldflags "$LDFLAGS -X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" -trimpath ./pkg/meej/cmd
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
