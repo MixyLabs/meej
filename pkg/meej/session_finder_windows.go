@@ -129,7 +129,7 @@ func newSessionFinder(logger *zap.SugaredLogger) (SessionFinder, error) {
 		logger:         logger.Named("session_finder"),
 		sessionLogger:  logger.Named("sessions"),
 		eventCtx:       ole.NewGUID(randomGUID),
-		sessionUpdates: make(chan SessionUpdate, 1), // buffered channel for notifications
+		sessionUpdates: make(chan SessionUpdate, 5), // buffered channel for notifications
 		releaseSession: make(chan CallbackRegistration, 1),
 		stop:           make(chan struct{}),
 	}
@@ -298,6 +298,9 @@ func (sf *wcaSessionFinder) getDefaultAudioEndpoints() (*wca.IMMDevice, *wca.IMM
 
 func (sf *wcaSessionFinder) registerDefaultDeviceChangeCallback() error {
 	callback := wca.IMMNotificationClientCallback{
+		OnDeviceAdded:          sf.deviceAddedCallback,
+		OnDeviceRemoved:        sf.deviceRemovedCallback,
+		OnDeviceStateChanged:   sf.deviceStateChangedCallback,
 		OnDefaultDeviceChanged: sf.defaultDeviceChangedCallback,
 	}
 
@@ -378,42 +381,10 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 				return fmt.Errorf("query device %d IMMEndpoint: %w", deviceIdx, err)
 			}
 
-			// get the device's property store
-			var propertyStore *wca.IPropertyStore
-
-			if err := endpoint.OpenPropertyStore(wca.STGM_READ, &propertyStore); err != nil {
-				sf.logger.Warnw("Failed to open property store for endpoint",
-					"deviceIdx", deviceIdx,
-					"error", err)
-
-				return fmt.Errorf("open endpoint %d property store: %w", deviceIdx, err)
+			endpointDescription, endpointFriendlyName, err := sf.getEndpointNames(endpoint)
+			if err != nil {
+				return err
 			}
-			defer propertyStore.Release()
-
-			// query the property store for the device's description and friendly name
-			value := &wca.PROPVARIANT{}
-
-			if err := propertyStore.GetValue(&wca.PKEY_Device_DeviceDesc, value); err != nil {
-				sf.logger.Warnw("Failed to get description for device",
-					"deviceIdx", deviceIdx,
-					"error", err)
-
-				return fmt.Errorf("get device %d description: %w", deviceIdx, err)
-			}
-
-			// device description i.e. "Headphones"
-			endpointDescription := strings.ToLower(value.String())
-
-			if err := propertyStore.GetValue(&wca.PKEY_Device_FriendlyName, value); err != nil {
-				sf.logger.Warnw("Failed to get friendly name for device",
-					"deviceIdx", deviceIdx,
-					"error", err)
-
-				return fmt.Errorf("get device %d friendly name: %w", deviceIdx, err)
-			}
-
-			// device friendly name i.e. "Headphones (Realtek Audio)"
-			endpointFriendlyName := value.String()
 
 			// receive a useful object instead of our dispatch
 			endpointType := (*wca.IMMEndpoint)(dispatch) //unsafe.Pointer
@@ -476,6 +447,43 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 	}
 
 	return nil
+}
+
+func (sf *wcaSessionFinder) getEndpointNames(endpoint *wca.IMMDevice) (string, string, error) {
+	// get the device's property store
+	var propertyStore *wca.IPropertyStore
+
+	if err := endpoint.OpenPropertyStore(wca.STGM_READ, &propertyStore); err != nil {
+		sf.logger.Warnw("Failed to open property store for endpoint",
+			"error", err)
+
+		return "", "", fmt.Errorf("open endpoint property store: %w", err)
+	}
+	defer propertyStore.Release()
+
+	// query the property store for the device's description and friendly name
+	value := &wca.PROPVARIANT{}
+
+	if err := propertyStore.GetValue(&wca.PKEY_Device_DeviceDesc, value); err != nil {
+		sf.logger.Warnw("Failed to get description for device",
+			"error", err)
+
+		return "", "", fmt.Errorf("get device description: %w", err)
+	}
+
+	// device description i.e. "Headphones"
+	endpointDescription := strings.ToLower(value.String())
+
+	if err := propertyStore.GetValue(&wca.PKEY_Device_FriendlyName, value); err != nil {
+		sf.logger.Warnw("Failed to get friendly name for device",
+			"error", err)
+
+		return "", "", fmt.Errorf("get device friendly name: %w", err)
+	}
+
+	// device friendly name i.e. "Headphones (Realtek Audio)"
+	endpointFriendlyName := value.String()
+	return endpointDescription, endpointFriendlyName, nil
 }
 
 func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
@@ -639,6 +647,10 @@ func (sf *wcaSessionFinder) processNewSession(audioSessionControl *wca.IAudioSes
 }
 
 func (sf *wcaSessionFinder) defaultDeviceChangedCallback(dataflow wca.EDataFlow, role wca.ERole, identifier string) error {
+	if role == 2 { // ignore eCommunications
+		return nil
+	}
+
 	// filter out calls that happen in rapid succession
 	now := time.Now()
 	if sf.lastDefaultDeviceChange.Add(time.Millisecond * 100).After(now) {
@@ -652,6 +664,50 @@ func (sf *wcaSessionFinder) defaultDeviceChangedCallback(dataflow wca.EDataFlow,
 	case sf.sessionUpdates <- SessionUpdate{MasterChanged: NewMaster{identifier, dataflow == 1}}:
 	default:
 		panic("Cannot send to chan")
+	}
+
+	return nil
+}
+
+func (sf *wcaSessionFinder) deviceAddedCallback(pwstrDeviceId string) error {
+	var endpoint *wca.IMMDevice
+	err := sf.mmDeviceEnumerator.GetDevice(pwstrDeviceId, &endpoint)
+	if err != nil {
+		sf.logger.Warnw("Failed to get MM device for new device", "error", err)
+		return nil
+	}
+
+	endpointDescription, endpointFriendlyName, err := sf.getEndpointNames(endpoint)
+
+	newIOSession, err := sf.getMasterSession(endpoint,
+		endpointFriendlyName,
+		fmt.Sprintf(deviceSessionFormat, endpointDescription))
+
+	select {
+	case sf.sessionUpdates <- SessionUpdate{IOAdded: newIOSession}:
+	default:
+		panic("Cannot send to chan")
+	}
+	return nil
+}
+
+func (sf *wcaSessionFinder) deviceRemovedCallback(pwstrDeviceId string) error {
+
+	select {
+	case sf.sessionUpdates <- SessionUpdate{IORemoved: pwstrDeviceId}:
+	default:
+		panic("Cannot send to chan")
+	}
+
+	return nil
+}
+func (sf *wcaSessionFinder) deviceStateChangedCallback(pwstrDeviceId string, dwNewState uint32) error {
+
+	switch dwNewState {
+	case wca.DEVICE_STATE_ACTIVE:
+		_ = sf.deviceAddedCallback(pwstrDeviceId)
+	case wca.DEVICE_STATE_DISABLED, wca.DEVICE_STATE_NOTPRESENT, wca.DEVICE_STATE_UNPLUGGED:
+		_ = sf.deviceRemovedCallback(pwstrDeviceId)
 	}
 
 	return nil

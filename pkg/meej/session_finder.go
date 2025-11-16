@@ -4,6 +4,7 @@ type SessionUpdate struct {
 	Added         Session
 	Deleted       string
 	IOAdded       Session
+	IORemoved     string
 	MasterChanged NewMaster
 }
 

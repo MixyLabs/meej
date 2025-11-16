@@ -152,8 +152,35 @@ func (m *sessionMapper) setupOnSessionsChanged() {
 					}
 				}
 				if update.IOAdded != nil {
-					m.ioSessions = append(m.ioSessions, update.IOAdded)
-					m.logger.Debugw("I/O Session added", "session", update.IOAdded)
+					sessionPresent := false
+					for _, session := range m.ioSessions {
+						if session.InternalKey() == update.IOAdded.InternalKey() {
+							sessionPresent = true
+						}
+					}
+					if sessionPresent {
+						m.logger.Warnw("Duplicate IO session", "sessionKey", update.IOAdded.Key())
+					} else {
+						m.ioSessions = append(m.ioSessions, update.IOAdded)
+						m.logger.Debugw("IO Session added", "sessionKey", update.IOAdded.Key())
+					}
+				}
+				if update.IORemoved != "" {
+					sessionRemoved := false
+
+					// IOAdded ensures no duplicates, so finish on first found
+					for i, ioSession := range m.ioSessions {
+						if ioSession.InternalKey() == update.IORemoved {
+							m.ioSessions = append(m.ioSessions[:i], m.ioSessions[i+1:]...)
+							m.logger.Debugw("IO Session removed", "sessionKey", update.IORemoved)
+							sessionRemoved = true
+							break
+						}
+					}
+					if !sessionRemoved {
+						// NOTE: it's super frequent (at least on Windows)
+						//m.logger.Warnw("no IO Session to remove", "sessionKey", update.IORemoved)
+					}
 				}
 				if update.MasterChanged != (NewMaster{}) {
 					m.setMaster(update.MasterChanged)
@@ -338,7 +365,7 @@ func (m *sessionMapper) setMaster(newMaster NewMaster) {
 			} else {
 				m.masterOutSession = ioSession
 			}
-			m.logger.Infow("Set new master session", "session", ioSession)
+			m.logger.Infow("Set new master session", "session", ioSession, "flowDir", newMaster.flowDir)
 			return
 		}
 	}
