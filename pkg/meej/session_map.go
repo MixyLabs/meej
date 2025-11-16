@@ -254,6 +254,10 @@ func (m *sessionMapper) handleSliderMoveEvent(event SliderMoveEvent) {
 	if setMasterOutVolume {
 		if m.masterOutSession != nil {
 			sessions = append(sessions, m.masterOutSession)
+			err := ShowAudioFlyout()
+			if err != nil {
+				m.logger.Warnw("Cannot display audio flyout: ", err)
+			}
 		} else {
 			m.logger.Warn("Master output session is nil, cannot set its volume")
 		}
