@@ -3,7 +3,6 @@ package meej
 import (
 	"fmt"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,11 +16,13 @@ type sessionMapper struct {
 	meej   *Meej
 	logger *zap.SugaredLogger
 
-	mapping map[string][]Session // (slider idx or special selector) to sessions
-	lock    sync.Locker
+	mapping          map[string][]Session // (slider idx or special selector) to sessions
+	ioSessions       []Session
+	masterInSession  Session
+	masterOutSession Session
+	lock             sync.Locker
 
 	sessionFinder SessionFinder
-	//lastSessionRefresh time.Time
 }
 
 const (
@@ -60,6 +61,8 @@ func newSessionMapper(meej *Meej, logger *zap.SugaredLogger, sessionFinder Sessi
 }
 
 func (m *sessionMapper) initialize() error {
+	m.setupOnSessionsChanged() // will receive IO sessions during getAndAddSessions
+
 	if err := m.getAndAddSessions(); err != nil {
 		m.logger.Warnw("Failed to get all sessions during session map initialization", "error", err)
 		return fmt.Errorf("get all sessions during init: %w", err)
@@ -67,7 +70,6 @@ func (m *sessionMapper) initialize() error {
 
 	m.setupOnConfigReload()
 	m.setupOnSliderMove()
-	m.setupOnSessionsChanged()
 
 	return nil
 }
@@ -149,6 +151,13 @@ func (m *sessionMapper) setupOnSessionsChanged() {
 						m.logger.Warnw("Session to remove not found in map", "sessionKey", update.Deleted)
 					}
 				}
+				if update.IOAdded != nil {
+					m.ioSessions = append(m.ioSessions, update.IOAdded)
+					m.logger.Debugw("I/O Session added", "session", update.IOAdded)
+				}
+				if update.MasterChanged != (NewMaster{}) {
+					m.setMaster(update.MasterChanged)
+				}
 			}
 		}
 	}()
@@ -189,13 +198,22 @@ func (m *sessionMapper) handleSliderMoveEvent(event SliderMoveEvent) {
 		return
 	}
 
+	setMasterOutVolume := false
+	setMasterInVolume := false
 	setCurrProcVolume := false
 	setUnmappedSessionVolume := false
 
 	for _, target := range sliderTargets {
+		if target == masterSessionName {
+			setMasterOutVolume = true
+		}
+		if target == inputSessionName {
+			setMasterInVolume = true
+		}
 		if target == specialTargetTransformPrefix+specialTargetCurrentWindow {
 			setCurrProcVolume = true
-		} else if target == specialTargetTransformPrefix+specialTargetAllUnmapped {
+		}
+		if target == specialTargetTransformPrefix+specialTargetAllUnmapped {
 			setUnmappedSessionVolume = true
 		}
 	}
@@ -204,15 +222,30 @@ func (m *sessionMapper) handleSliderMoveEvent(event SliderMoveEvent) {
 		m.currProcessSetVolume(event.PercentValue)
 	}
 
-	sessions, ok := m.mapping[strconv.Itoa(event.SliderID)]
+	sessions, _ := m.mapping[strconv.Itoa(event.SliderID)]
+
+	if setMasterOutVolume {
+		if m.masterOutSession != nil {
+			sessions = append(sessions, m.masterOutSession)
+		} else {
+			m.logger.Warn("Master output session is nil, cannot set its volume")
+		}
+	}
+	if setMasterInVolume {
+		if m.masterInSession != nil {
+			sessions = append(sessions, m.masterInSession)
+		} else {
+			m.logger.Warn("Master output session is nil, cannot set its volume")
+		}
+	}
+
 	if setUnmappedSessionVolume {
 		unmapped, unmappedOk := m.mapping["-1"]
 		if unmappedOk {
 			sessions = append(sessions, unmapped...)
-			ok = true
 		}
 	}
-	if !ok && !setUnmappedSessionVolume {
+	if len(sessions) == 0 {
 		return
 	}
 
@@ -291,9 +324,24 @@ func (m *sessionMapper) removeSession(sessionKey string) bool {
 		m.mapping[key] = newSessions
 	}
 
-	runtime.GC()
-
 	return anyRemoved
+}
+
+func (m *sessionMapper) setMaster(newMaster NewMaster) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	for _, ioSession := range m.ioSessions {
+		if ioSession.InternalKey() == newMaster.endpointID {
+			if newMaster.flowDir {
+				m.masterInSession = ioSession
+			} else {
+				m.masterOutSession = ioSession
+			}
+			m.logger.Infow("Set new master session", "session", ioSession)
+			return
+		}
+	}
 }
 
 func (m *sessionMapper) get(key string) ([]Session, bool) {
@@ -317,6 +365,12 @@ func (m *sessionMapper) clear() {
 
 		delete(m.mapping, key)
 	}
+
+	m.masterOutSession = nil
+	m.masterInSession = nil
+
+	// IO sessions got released above
+	m.ioSessions = nil
 
 	m.logger.Debug("Session map cleared")
 }

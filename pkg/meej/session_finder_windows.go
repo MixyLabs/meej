@@ -30,10 +30,6 @@ type wcaSessionFinder struct {
 
 	sessionNotifications []ManagerWithNotif
 
-	// our master input and output sessions
-	masterOut *masterSession
-	masterIn  *masterSession
-
 	stop           chan struct{}
 	releaseSession chan CallbackRegistration
 
@@ -88,6 +84,7 @@ func (sf *wcaSessionFinder) onStateChanged(sessionName string, release func(), n
 		select {
 		case sf.sessionUpdates <- SessionUpdate{Deleted: sessionName}:
 		default:
+			panic("Cannot send to chan")
 		}
 		release()
 	}
@@ -102,6 +99,7 @@ func (sf *wcaSessionFinder) onSessionDisconnected(sessionName string, release fu
 	select {
 	case sf.sessionUpdates <- SessionUpdate{Deleted: sessionName}:
 	default:
+		panic("Cannot send to chan")
 	}
 
 	return nil
@@ -120,6 +118,7 @@ func (sf *wcaSessionFinder) onSessionCreated(pNewSession *wca.IAudioSessionContr
 	select {
 	case sf.sessionUpdates <- SessionUpdate{Added: newSessionObj}:
 	default:
+		panic("Cannot send to chan")
 	}
 
 	return nil
@@ -207,46 +206,12 @@ func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 	}
 	sf.sessionNotifications = nil
 
-	// get the currently active default output and input devices.
-	// please note that this can return a nil defaultInputEndpoint, in case there are no input devices connected.
-	// you must check it for non-nil
-	defaultOutputEndpoint, defaultInputEndpoint, err := sf.getDefaultAudioEndpoints()
-	if err != nil {
-		sf.logger.Warnw("Failed to get default audio endpoints", "error", err)
-		return nil, fmt.Errorf("get default audio endpoints: %w", err)
-	}
-	defer defaultOutputEndpoint.Release()
-
-	if defaultInputEndpoint != nil {
-		defer defaultInputEndpoint.Release()
-	}
-
 	// receive notifications whenever the default device changes (only do this once)
-	/*if sf.mmNotificationClient == nil {
+	if sf.mmNotificationClient == nil {
 		if err := sf.registerDefaultDeviceChangeCallback(); err != nil {
 			sf.logger.Warnw("Failed to register default device change callback", "error", err)
 			return nil, fmt.Errorf("register default device change callback: %w", err)
 		}
-	}*/
-
-	// get the master output session
-	sf.masterOut, err = sf.getMasterSession(defaultOutputEndpoint, masterSessionName, masterSessionName)
-	if err != nil {
-		sf.logger.Warnw("Failed to get master audio output session", "error", err)
-		return nil, fmt.Errorf("get master audio output session: %w", err)
-	}
-
-	sessions = append(sessions, sf.masterOut)
-
-	// get the master input session, if a default input device exists
-	if defaultInputEndpoint != nil {
-		sf.masterIn, err = sf.getMasterSession(defaultInputEndpoint, inputSessionName, inputSessionName)
-		if err != nil {
-			sf.logger.Warnw("Failed to get master audio input session", "error", err)
-			return nil, fmt.Errorf("get master audio input session: %w", err)
-		}
-
-		sessions = append(sessions, sf.masterIn)
 	}
 
 	// enumerate all devices and make their "master" sessions bindable by friendly name;
@@ -254,6 +219,42 @@ func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 	if err := sf.enumerateAndAddSessions(&sessions); err != nil {
 		sf.logger.Warnw("Failed to enumerate device sessions", "error", err)
 		return nil, fmt.Errorf("enumerate device sessions: %w", err)
+	}
+
+	// enumerateAndAddSessions already registered IO sessions
+	// now just get the currently active default output and input devices
+	// and send MasterChanged updates for them
+	defaultOutputEndpoint, defaultInputEndpoint, err := sf.getDefaultAudioEndpoints()
+	if err != nil {
+		sf.logger.Warnw("Failed to get default audio endpoints", "error", err)
+		return nil, fmt.Errorf("get default audio endpoints: %w", err)
+	}
+	defer defaultOutputEndpoint.Release()
+	if defaultInputEndpoint != nil {
+		defer defaultInputEndpoint.Release()
+	}
+
+	var endpointID string
+	if err := defaultOutputEndpoint.GetId(&endpointID); err != nil {
+		sf.logger.Warnw("Failed to get endpointID of default output device", "error", err)
+		return nil, fmt.Errorf("get default output endpointID: %w", err)
+	}
+	select {
+	case sf.sessionUpdates <- SessionUpdate{MasterChanged: NewMaster{endpointID, false}}:
+	default:
+		panic("Cannot send to chan")
+	}
+
+	if defaultInputEndpoint != nil {
+		if err := defaultInputEndpoint.GetId(&endpointID); err != nil {
+			sf.logger.Warnw("Failed to get endpointID of default input device", "error", err)
+			return nil, fmt.Errorf("get default input endpointID: %w", err)
+		}
+		select {
+		case sf.sessionUpdates <- SessionUpdate{MasterChanged: NewMaster{endpointID, true}}:
+		default:
+			panic("Cannot send to chan")
+		}
 	}
 
 	return sessions, nil
@@ -295,7 +296,7 @@ func (sf *wcaSessionFinder) getDefaultAudioEndpoints() (*wca.IMMDevice, *wca.IMM
 	return mmOutDevice, mmInDevice, nil
 }
 
-/*func (sf *wcaSessionFinder) registerDefaultDeviceChangeCallback() error {
+func (sf *wcaSessionFinder) registerDefaultDeviceChangeCallback() error {
 	callback := wca.IMMNotificationClientCallback{
 		OnDefaultDeviceChanged: sf.defaultDeviceChangedCallback,
 	}
@@ -308,7 +309,7 @@ func (sf *wcaSessionFinder) getDefaultAudioEndpoints() (*wca.IMMDevice, *wca.IMM
 	}
 
 	return nil
-}*/
+}
 
 func (sf *wcaSessionFinder) getMasterSession(mmDevice *wca.IMMDevice, key string, loggerKey string) (*masterSession, error) {
 	var audioEndpointVolume *wca.IAudioEndpointVolume
@@ -318,8 +319,15 @@ func (sf *wcaSessionFinder) getMasterSession(mmDevice *wca.IMMDevice, key string
 		return nil, fmt.Errorf("activate master session: %w", err)
 	}
 
+	var endpointID string
+	err := mmDevice.GetId(&endpointID)
+	if err != nil {
+		sf.logger.Warnw("Failed to get endpointID of master session", "error", err)
+		return nil, fmt.Errorf("get master endpointID: %w", err)
+	}
+
 	// create the master session
-	master, err := newMasterSession(sf.sessionLogger, audioEndpointVolume, sf.eventCtx, key, loggerKey)
+	master, err := newMasterSession(sf.sessionLogger, audioEndpointVolume, sf.eventCtx, key, endpointID, loggerKey)
 	if err != nil {
 		sf.logger.Warnw("Failed to create master session instance", "error", err)
 		return nil, fmt.Errorf("create master session: %w", err)
@@ -439,7 +447,7 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 
 			// for all devices (both input and output), add a named "master" session that can be addressed
 			// by using the device's friendly name (as appears when the user left-clicks the speaker icon in the tray)
-			newSession, err := sf.getMasterSession(endpoint,
+			newIOSession, err := sf.getMasterSession(endpoint,
 				endpointFriendlyName,
 				fmt.Sprintf(deviceSessionFormat, endpointDescription))
 
@@ -451,8 +459,14 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 				return fmt.Errorf("get device %d master session: %w", deviceIdx, err)
 			}
 
+			select {
+			case sf.sessionUpdates <- SessionUpdate{IOAdded: newIOSession}:
+			default:
+				panic("Cannot send to chan")
+			}
+
 			// add it to our slice
-			*sessions = append(*sessions, newSession)
+			*sessions = append(*sessions, newIOSession)
 
 			return nil
 		}()
@@ -624,26 +638,21 @@ func (sf *wcaSessionFinder) processNewSession(audioSessionControl *wca.IAudioSes
 	return newSession, nil
 }
 
-/*
 func (sf *wcaSessionFinder) defaultDeviceChangedCallback(dataflow wca.EDataFlow, role wca.ERole, identifier string) error {
-		// filter out calls that happen in rapid succession
-		now := time.Now()
-
-		if sf.lastDefaultDeviceChange.Add(minDefaultDeviceChangeThreshold).After(now) {
-			return nil
-		}
-
-		sf.lastDefaultDeviceChange = now
-
-		sf.logger.Debug("Default audio device changed, marking master sessions as stale")
-		if sf.masterOut != nil {
-			sf.masterOut.markAsStale()
-		}
-
-		if sf.masterIn != nil {
-			sf.masterIn.markAsStale()
-		}
-
+	// filter out calls that happen in rapid succession
+	now := time.Now()
+	if sf.lastDefaultDeviceChange.Add(time.Millisecond * 100).After(now) {
 		return nil
 	}
-*/
+	sf.lastDefaultDeviceChange = now
+
+	sf.logger.Debug("Default audio device changed, new id: " + identifier)
+
+	select {
+	case sf.sessionUpdates <- SessionUpdate{MasterChanged: NewMaster{identifier, dataflow == 1}}:
+	default:
+		panic("Cannot send to chan")
+	}
+
+	return nil
+}

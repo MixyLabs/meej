@@ -87,6 +87,7 @@ func (bio *BLEIO) Start() error {
 				select {
 				case runScan <- struct{}{}:
 				default:
+					panic("Cannot send to chan")
 				}
 			}
 		})
@@ -118,6 +119,7 @@ func (bio *BLEIO) Start() error {
 								select {
 								case bio.devFoundChannel <- result:
 								default:
+									panic("Cannot send to chan")
 								}
 							}
 						}
