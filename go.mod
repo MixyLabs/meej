@@ -9,8 +9,8 @@ require (
 	github.com/gen2brain/beeep v0.11.1
 	github.com/go-ole/go-ole v1.3.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
+	github.com/gonutz/w32/v2 v2.12.1
 	github.com/jfreymuth/pulse v0.1.1
-	github.com/lxn/win v0.0.0-20210218163916-a377121e959e
 	github.com/mitchellh/go-ps v1.0.0
 	github.com/spf13/viper v1.21.0
 	github.com/thoas/go-funk v0.9.3
@@ -24,6 +24,7 @@ replace tinygo.org/x/bluetooth v0.13.0 => github.com/MixyLabs/tinygo-bluetooth v
 
 replace fyne.io/systray v1.11.0 => github.com/MixyLabs/go-systray v1.11.1
 
+
 require (
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
@@ -33,6 +34,7 @@ require (
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/rodolfoag/gow32 v0.0.0-20230512144032-1e896a3c51aa // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/saltosystems/winrt-go v0.0.0-20240509164145-4f7860a3bd2b // indirect
 	github.com/sergeymakinen/go-bmp v1.0.0 // indirect

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/MixyLabs/meej/pkg/meej"
+	"github.com/MixyLabs/meej/pkg/meej/util"
 )
 
 var (
@@ -22,6 +23,11 @@ func init() {
 }
 
 func main() {
+	if err := util.CreateMutex("MixyLabs"); err != nil {
+		println("!!! An instance of meej is already running. Quitting...")
+		return
+	}
+
 	logger, err := meej.NewLogger(buildType)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create logger: %v", err))

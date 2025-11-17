@@ -2,12 +2,11 @@ package util
 
 import (
 	"fmt"
-	"syscall"
 	"time"
-	"unsafe"
 
-	"github.com/lxn/win"
+	"github.com/gonutz/w32/v2"
 	"github.com/mitchellh/go-ps"
+	"github.com/rodolfoag/gow32"
 )
 
 const (
@@ -42,16 +41,16 @@ func getCurrentWindowProcessNames() ([]string, error) {
 	result := []string{}
 
 	// a callback that will be called for each child window of the foreground window, if it has any
-	enumChildWindowsCallback := func(childHWND *uintptr, lParam *uintptr) uintptr {
+	enumChildWindowsCallback := func(childHWND w32.HWND, lParam w32.DWORD) bool {
 		// cast the outer lp into something we can work with (maybe closures are good enough?)
-		ownerPID := (*uint32)(unsafe.Pointer(lParam))
+		ownerPID := lParam
 
 		// get the child window's real PID
-		var childPID uint32
-		win.GetWindowThreadProcessId((win.HWND)(unsafe.Pointer(childHWND)), &childPID)
+		_, childPID := w32.GetWindowThreadProcessId(childHWND)
+		//win.GetWindowThreadProcessId(), &childPID)
 
 		// compare it to the parent's - if they're different, add the child window's process to our list of process names
-		if childPID != *ownerPID {
+		if childPID != ownerPID {
 			// FIXME: this can silently fail, needs to be tested more thoroughly and possibly reverted in the future
 			actualProcess, err := ps.FindProcess(int(childPID))
 			if err == nil {
@@ -60,15 +59,14 @@ func getCurrentWindowProcessNames() ([]string, error) {
 		}
 
 		// indicates to the system to keep iterating
-		return 1
+		return true
 	}
 
 	// get the current foreground window
-	hwnd := win.GetForegroundWindow()
-	var ownerPID uint32
+	hwnd := w32.GetForegroundWindow()
 
 	// get its PID and put it in our window info struct
-	win.GetWindowThreadProcessId(hwnd, &ownerPID)
+	_, ownerPID := w32.GetWindowThreadProcessId(hwnd)
 
 	// check for system PID (0)
 	if ownerPID == 0 {
@@ -85,9 +83,16 @@ func getCurrentWindowProcessNames() ([]string, error) {
 	result = append(result, process.Executable())
 
 	// iterate its child windows, adding their names too
-	win.EnumChildWindows(hwnd, syscall.NewCallback(enumChildWindowsCallback), (uintptr)(unsafe.Pointer(&ownerPID)))
+	w32.EnumChildWindows(hwnd, func(window w32.HWND) bool { return enumChildWindowsCallback(window, ownerPID) })
 
 	// cache & return whichever executable names we ended up with
 	lastGetCurrentWindowResult = result
 	return result, nil
+}
+
+func CreateMutex(name string) error {
+	// cannot use w32.CreateMutex as it doesn't return an error
+	// relying on OS to release it on program exit
+	_, err := gow32.CreateMutex("Global//" + name)
+	return err
 }
