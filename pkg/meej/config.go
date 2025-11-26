@@ -21,7 +21,8 @@ type ConfigManager struct {
 
 	reloadConsumers []chan bool
 
-	userConfig     *viper.Viper
+	userConfig *viper.Viper
+	// TODO: still no use for this one
 	internalConfig *viper.Viper
 
 	current Config
@@ -29,6 +30,8 @@ type ConfigManager struct {
 
 type Config struct {
 	SliderMapping *sliderMap
+
+	AudioFlyout bool `mapstructure:"audio_flyout"`
 
 	InvertSliders bool `mapstructure:"invert_sliders"`
 

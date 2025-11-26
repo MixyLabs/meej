@@ -506,6 +506,7 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 		return fmt.Errorf("activate endpoint: %w", err)
 	}
 
+	// TODO: also register for new audio endpoints in deviceAddedCallback
 	callback := wca.IAudioSessionNotificationCallback{
 		OnSessionCreated: func(pNewSession *wca.IAudioSessionControl) error {
 			return sf.onSessionCreated(pNewSession)

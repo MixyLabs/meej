@@ -40,6 +40,7 @@ func (d *Meej) initializeTray(onDone func()) {
 				case <-editConfig.ClickedCh:
 					logger.Info("Edit config menu item clicked, opening config for editing")
 
+					// TODO: make editor configurable
 					editor := "notepad.exe"
 					if util.Linux() {
 						editor = "gedit"

@@ -8,8 +8,12 @@
 slider_mapping:
   0: master
   1:
-   - zen.exe
-   - obs64.exe
+    - zen.exe
+    - obs64.exe
+
+# Trigger a native audio flyout for applicable volume changes
+# Currently only for master device on Windows 11
+audio_flyout: true
 
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
@@ -24,8 +28,8 @@ disable_tray: false
 # actually fast reconnect works worse on it
 fast_reconnect: true
 
-# these parameters are applied to mixy
-# they allow to make mixy more responsive
+# these parameters are applied to Mixy
+# they allow to make knobs more responsive
 # but extreme values will drain the battery much faster
 # try to keep intervals high and timeout low
 # both are expressed in milliseconds

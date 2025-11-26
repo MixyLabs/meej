@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MixyLabs/meej/pkg/meej/util"
 	"github.com/thoas/go-funk"
@@ -23,6 +24,8 @@ type sessionMapper struct {
 	lock             sync.Locker
 
 	sessionFinder SessionFinder
+
+	lastAudioFlyoutShown time.Time
 }
 
 const (
@@ -254,10 +257,8 @@ func (m *sessionMapper) handleSliderMoveEvent(event SliderMoveEvent) {
 	if setMasterOutVolume {
 		if m.masterOutSession != nil {
 			sessions = append(sessions, m.masterOutSession)
-			err := ShowAudioFlyout()
-			if err != nil {
-				m.logger.Warnw("Cannot display audio flyout: ", err)
-			}
+
+			m.maybeTriggerAudioFlyout()
 		} else {
 			m.logger.Warn("Master output session is nil, cannot set its volume")
 		}
@@ -289,6 +290,22 @@ func (m *sessionMapper) handleSliderMoveEvent(event SliderMoveEvent) {
 		//}
 	}
 
+}
+
+func (m *sessionMapper) maybeTriggerAudioFlyout() {
+	if !m.meej.currConf().AudioFlyout {
+		return
+	}
+
+	now := time.Now()
+	if m.lastAudioFlyoutShown.Add(time.Second).Before(now) {
+		m.logger.Debugw("Showing audio flyout for master volume change")
+		err := ShowAudioFlyout()
+		if err != nil {
+			m.logger.Warnw("Cannot display audio flyout: ", err)
+		}
+		m.lastAudioFlyoutShown = now
+	}
 }
 
 func (m *sessionMapper) targetHasSpecialTransform(target string) bool {
